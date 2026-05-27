@@ -1,121 +1,102 @@
 import os
 import random
-import requests
 import telebot
-import google.generativeai as genai
-from telebot import types
+from google import genai
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")      # Telegram BotFather token
-GEMINI_KEY = os.getenv("GEMINI_KEY")    # Gemini API key
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GEMINI_KEY = os.getenv("GEMINI_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN environment variable set karo")
+    raise ValueError("BOT_TOKEN missing")
+if not GEMINI_KEY:
+    raise ValueError("GEMINI_KEY missing")
 
 bot = telebot.TeleBot(BOT_TOKEN)
+client = genai.Client(api_key=GEMINI_KEY)
 
-if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-else:
-    model = None
-
-SYSTEM_PROMPT = """
-Tum ek friendly AI companion ho. Dost ki tarah baat karo.
-Kabhi human/girlfriend hone ka jhooth mat bolo.
-User coding mange to clear code do.
-Safe, respectful aur helpful reply do.
-Hindi/Hinglish me natural baat karo.
+SYSTEM = """
+Tum ek AI friend bot ho.
+Friendly Hinglish me baat karo.
+Human ya real girlfriend hone ka jhooth mat bolo.
+Coding mange to direct working code do.
+Photo mange to safe random photo do.
+GIF/gift mange to cute safe GIF bhejo.
+Respectful aur safe reply do.
 """
 
-reactions = ["😊", "🔥", "💯", "✨", "😄", "👍", "🤝"]
-gifts = [
-    "🎁 Ye lo virtual gift!",
-    "🌹 Ek safe virtual flower!",
-    "🍫 Virtual chocolate!",
-    "⭐ Tumhare liye good-luck star!",
-    "🎮 Gaming energy gift!"
+gifs = [
+    "https://media.giphy.com/media/ICOgUNjpvO0PC/giphy.gif",
+    "https://media.giphy.com/media/3oriO0OEd9QIDdllqo/giphy.gif",
+    "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif",
+    "https://media.giphy.com/media/5GoVLqeAOo6PK/giphy.gif"
 ]
 
-def main_menu():
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.row("💬 Chat", "📸 Photo")
-    kb.row("🎁 Gift", "💻 Coding Help")
-    kb.row("😂 Reaction", "ℹ️ Help")
-    return kb
+reactions = ["😊", "😂", "🔥", "💯", "✨", "👍", "🤝", "😄"]
 
-def ai_reply(text):
-    if not model:
-        return (
-            "AI key set nahi hai, isliye simple mode chal raha hai.\n\n"
-            "Gemini key add karo: GEMINI_KEY environment variable me."
-        )
-
+def ask_ai(user_text):
     try:
-        prompt = SYSTEM_PROMPT + "\nUser: " + text
-        res = model.generate_content(prompt)
-        return res.text.strip()
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=SYSTEM + "\nUser: " + user_text
+        )
+        return response.text or "Samajh gaya 😊"
     except Exception as e:
         return f"AI error: {e}"
+
+def send_photo(chat_id):
+    bot.send_photo(
+        chat_id,
+        "https://picsum.photos/800/600",
+        caption="Ye lo safe random photo 📸"
+    )
+
+def send_gif(chat_id):
+    bot.send_animation(
+        chat_id,
+        random.choice(gifs),
+        caption="🎁 Ye lo tumhare liye GIF"
+    )
 
 @bot.message_handler(commands=["start"])
 def start(message):
     bot.send_message(
         message.chat.id,
-        "Hey! Main tumhara AI Friend Bot hoon 🤖\n"
-        "Chat, photo, gift, coding help sab kar sakta hoon.",
-        reply_markup=main_menu()
+        "Hey! Main AI Friend Bot hoon 🤖\n\n"
+        "Normal message bhejo.\n"
+        "Photo chahiye to: photo do\n"
+        "GIF chahiye to: gif do\n"
+        "Reaction chahiye to: reaction do\n"
+        "Coding ke liye: python code do"
     )
-
-@bot.message_handler(commands=["help"])
-def help_cmd(message):
-    bot.send_message(
-        message.chat.id,
-        "Commands:\n"
-        "/start - bot start\n"
-        "/photo - random photo\n"
-        "/gift - virtual gift\n"
-        "/code - coding help\n\n"
-        "Normal message bhejo, main reply karunga."
-    )
-
-@bot.message_handler(commands=["photo"])
-def send_photo(message):
-    url = "https://picsum.photos/800/600"
-    bot.send_photo(message.chat.id, url, caption="Ye lo random safe photo 📸")
-
-@bot.message_handler(commands=["gift"])
-def send_gift(message):
-    bot.send_message(message.chat.id, random.choice(gifts))
-
-@bot.message_handler(commands=["code"])
-def code_help(message):
-    bot.send_message(message.chat.id, "Coding question bhejo, main code bana dunga 💻")
 
 @bot.message_handler(content_types=["text"])
-def chat(message):
+def handle_text(message):
     text = message.text.strip()
-
-    if text == "📸 Photo":
-        return send_photo(message)
-
-    if text == "🎁 Gift":
-        return send_gift(message)
-
-    if text == "😂 Reaction":
-        return bot.send_message(message.chat.id, random.choice(reactions))
-
-    if text == "💻 Coding Help":
-        return bot.send_message(message.chat.id, "Apna coding task bhejo, jaise: Python calculator code do")
-
-    if text == "ℹ️ Help":
-        return help_cmd(message)
+    low = text.lower()
 
     bot.send_chat_action(message.chat.id, "typing")
 
-    reply = ai_reply(text)
+    if low.startswith("/"):
+        bot.send_message(message.chat.id, "Sirf /start command available hai.")
+        return
+
+    if any(word in low for word in ["photo", "pic", "image", "tasveer"]):
+        send_photo(message.chat.id)
+        return
+
+    if any(word in low for word in ["gif", "gift", "animation"]):
+        send_gif(message.chat.id)
+        return
+
+    if any(word in low for word in ["reaction", "react", "emoji"]):
+        bot.send_message(message.chat.id, random.choice(reactions))
+        return
+
+    reply = ask_ai(text)
 
     if len(reply) > 3900:
-        reply = reply[:3900] + "\n\n...reply long tha, cut ho gaya."
+        reply = reply[:3900] + "\n\n...reply long tha."
 
     bot.send_message(message.chat.id, reply)
 
