@@ -1,108 +1,123 @@
-import telebot
-import requests
-import time
-import io
 import os
-from urllib.parse import quote
-from flask import Flask
-from threading import Thread
+import random
+import requests
+import telebot
+import google.generativeai as genai
+from telebot import types
 
-# --- RENDER PORT BINDING (Fix for Port Timeout) ---
-app = Flask('')
+BOT_TOKEN = os.getenv("BOT_TOKEN")      # Telegram BotFather token
+GEMINI_KEY = os.getenv("GEMINI_KEY")    # Gemini API key
 
-@app.route('/')
-def home():
-    return "Shreya is Online! ❤️"
-
-def run():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-# --- CONFIGURATION (Render ke Environment Variables se lega) ---
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable set karo")
 
 bot = telebot.TeleBot(BOT_TOKEN)
-user_history = {}
 
-# Shreya ki Personality
-SYSTEM_PROMPT = (
-    "Your name is Shreya. You are the user's girlfriend. "
-    "Talk in Hinglish. Reply in only 1 SHORT line. "
-    "Be romantic and sweet. Never say you are an AI."
-)
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+else:
+    model = None
 
-# --- PHOTO GENERATE FUNCTION ---
-def send_shreya_photo(chat_id):
-    prompt = (
-        "A realistic selfie of a beautiful 20 year old Indian girl, "
-        "cute face, smiling, long black hair, natural skin tone, "
-        "looking at camera, indoor lighting, high quality."
+SYSTEM_PROMPT = """
+Tum ek friendly AI companion ho. Dost ki tarah baat karo.
+Kabhi human/girlfriend hone ka jhooth mat bolo.
+User coding mange to clear code do.
+Safe, respectful aur helpful reply do.
+Hindi/Hinglish me natural baat karo.
+"""
+
+reactions = ["😊", "🔥", "💯", "✨", "😄", "👍", "🤝"]
+gifts = [
+    "🎁 Ye lo virtual gift!",
+    "🌹 Ek safe virtual flower!",
+    "🍫 Virtual chocolate!",
+    "⭐ Tumhare liye good-luck star!",
+    "🎮 Gaming energy gift!"
+]
+
+def main_menu():
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row("💬 Chat", "📸 Photo")
+    kb.row("🎁 Gift", "💻 Coding Help")
+    kb.row("😂 Reaction", "ℹ️ Help")
+    return kb
+
+def ai_reply(text):
+    if not model:
+        return (
+            "AI key set nahi hai, isliye simple mode chal raha hai.\n\n"
+            "Gemini key add karo: GEMINI_KEY environment variable me."
+        )
+
+    try:
+        prompt = SYSTEM_PROMPT + "\nUser: " + text
+        res = model.generate_content(prompt)
+        return res.text.strip()
+    except Exception as e:
+        return f"AI error: {e}"
+
+@bot.message_handler(commands=["start"])
+def start(message):
+    bot.send_message(
+        message.chat.id,
+        "Hey! Main tumhara AI Friend Bot hoon 🤖\n"
+        "Chat, photo, gift, coding help sab kar sakta hoon.",
+        reply_markup=main_menu()
     )
-    encoded = quote(prompt)
-    seed = int(time.time()) 
-    img_url = f"https://pollinations.ai/p/{encoded}?width=1080&height=1350&seed={seed}&model=flux"
-    
-    try:
-        response = requests.get(img_url, timeout=20)
-        if response.status_code == 200:
-            photo_bytes = io.BytesIO(response.content)
-            bot.send_photo(chat_id, photo_bytes, caption="Kaisi lag rahi hoon? ❤️ Sharma gayi main toh! 🙈")
-        else:
-            bot.send_message(chat_id, "Sorry baby, photo click nahi ho paayi.. 🥺")
-    except Exception as e:
-        print(f"Error: {e}")
-        bot.send_message(chat_id, "Net issue hai jaan, photo nahi ja rahi.. 🥺")
 
-# --- CHAT FUNCTION (Groq API) ---
-def get_chat_response(user_id, text):
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    if user_id not in user_history:
-        user_history[user_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
-    
-    user_history[user_id].append({"role": "user", "content": text})
-    
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": user_history[user_id],
-        "temperature": 0.8,
-        "max_tokens": 70
-    }
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+@bot.message_handler(commands=["help"])
+def help_cmd(message):
+    bot.send_message(
+        message.chat.id,
+        "Commands:\n"
+        "/start - bot start\n"
+        "/photo - random photo\n"
+        "/gift - virtual gift\n"
+        "/code - coding help\n\n"
+        "Normal message bhejo, main reply karunga."
+    )
 
-    try:
-        res = requests.post(url, json=payload, headers=headers, timeout=15)
-        res_data = res.json()
-        return res_data['choices'][0]['message']['content']
-    except Exception as e:
-        print(f"Groq Error: {e}")
-        return "Net slow hai jaan.. 🥺"
+@bot.message_handler(commands=["photo"])
+def send_photo(message):
+    url = "https://picsum.photos/800/600"
+    bot.send_photo(message.chat.id, url, caption="Ye lo random safe photo 📸")
 
-# --- HANDLERS ---
-@bot.message_handler(func=lambda message: True)
-def handle_msg(message):
-    text = message.text.lower()
-    uid = message.chat.id
+@bot.message_handler(commands=["gift"])
+def send_gift(message):
+    bot.send_message(message.chat.id, random.choice(gifts))
 
-    # Photo Check
-    photo_keywords = ["photo", "pic", "selfie", "image", "dikhao", "bhejo"]
-    if any(w in text for w in photo_keywords) and ("apni" in text or "teri" in text or "selfie" in text):
-        bot.send_message(uid, "Ruko jaan, apni ek pyari si photo bhejti hoon... 😘")
-        bot.send_chat_action(uid, 'upload_photo')
-        send_shreya_photo(uid)
-        return
+@bot.message_handler(commands=["code"])
+def code_help(message):
+    bot.send_message(message.chat.id, "Coding question bhejo, main code bana dunga 💻")
 
-    # Normal Chat
-    bot.send_chat_action(uid, 'typing')
-    reply = get_chat_response(uid, message.text)
-    bot.reply_to(message, reply)
+@bot.message_handler(content_types=["text"])
+def chat(message):
+    text = message.text.strip()
 
-# --- START BOT ---
-if __name__ == "__main__":
-    keep_alive() # Flask server start karega Render ke liye
-    print("Shreya is Online! ❤️")
-    bot.infinity_polling(timeout=10, long_polling_timeout=5)
+    if text == "📸 Photo":
+        return send_photo(message)
+
+    if text == "🎁 Gift":
+        return send_gift(message)
+
+    if text == "😂 Reaction":
+        return bot.send_message(message.chat.id, random.choice(reactions))
+
+    if text == "💻 Coding Help":
+        return bot.send_message(message.chat.id, "Apna coding task bhejo, jaise: Python calculator code do")
+
+    if text == "ℹ️ Help":
+        return help_cmd(message)
+
+    bot.send_chat_action(message.chat.id, "typing")
+
+    reply = ai_reply(text)
+
+    if len(reply) > 3900:
+        reply = reply[:3900] + "\n\n...reply long tha, cut ho gaya."
+
+    bot.send_message(message.chat.id, reply)
+
+print("Bot started...")
+bot.infinity_polling(timeout=60, long_polling_timeout=60)
